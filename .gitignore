@@ -1,0 +1,6 @@
+.esphome/
+secrets.yaml
+build/
+/firmware/
+.claude/
+__pycache__/

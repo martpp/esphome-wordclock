@@ -1,0 +1,75 @@
+blueprint:
+  name: "Word clock: notification animation"
+  description: >-
+    Plays an animation on the word clock when an entity changes, e.g. the doorbell rings,
+    the washing machine or the 3D printer is done. The timer keeps running behind the
+    animation.
+  domain: automation
+  source_url: https://github.com/martpp/esphome-wordclock/blob/main/homeassistant/blueprints/automation/wordclock/notification_animation.yaml
+  input:
+    trigger_entity:
+      name: Entity
+      description: The entity that triggers the animation (sensor, binary sensor, event, ...).
+      selector:
+        entity:
+    to_state:
+      name: Target state
+      description: >-
+        Only play when the entity changes to this state (e.g. "on", "finish"). Leave empty to
+        play on every state change, which suits event entities such as doorbells.
+      default: ""
+      selector:
+        text:
+    animation:
+      name: Animation
+      default: done
+      selector:
+        select:
+          options:
+            - {label: Door, value: door}
+            - {label: Doorbell, value: doorbell}
+            - {label: 3D printer, value: printer}
+            - {label: Washer, value: washer}
+            - {label: Mail, value: mail}
+            - {label: Done, value: done}
+            - {label: Warning, value: warning}
+    seconds:
+      name: Duration
+      description: How long to repeat the animation. 0 plays it once.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: s
+    device_name:
+      name: ESPHome device name
+      description: The "name:" of the clock in ESPHome.
+      default: wordclock
+      selector:
+        text:
+
+mode: single
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    not_from: [unavailable, unknown]
+
+variables:
+  device: !input device_name
+  target: !input to_state
+  animation: !input animation
+  seconds: !input seconds
+
+conditions:
+  - "{{ trigger.to_state is not none and trigger.to_state.state not in ['unavailable', 'unknown'] }}"
+  # ignore attribute-only changes, except for event entities whose state is a timestamp
+  - "{{ trigger.from_state is none or trigger.from_state.state != trigger.to_state.state }}"
+  - "{{ target == '' or trigger.to_state.state == target }}"
+
+actions:
+  - action: "esphome.{{ device }}_animation_show"
+    data:
+      name: "{{ animation }}"
+      seconds: "{{ seconds | int(0) }}"

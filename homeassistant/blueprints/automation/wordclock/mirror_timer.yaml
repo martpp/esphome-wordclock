@@ -1,0 +1,52 @@
+blueprint:
+  name: "Word clock: show Home Assistant timers"
+  description: >-
+    Shows timer helpers on the word clock. Starting, restarting, pausing or cancelling one of
+    the selected timers is mirrored to the clock. When a timer runs out, the clock counts down
+    to zero by itself and blinks.
+  domain: automation
+  source_url: https://github.com/martpp/esphome-wordclock/blob/main/homeassistant/blueprints/automation/wordclock/mirror_timer.yaml
+  input:
+    timers:
+      name: Timers
+      description: Timer helpers to show on the clock.
+      selector:
+        entity:
+          domain: timer
+          multiple: true
+    device_name:
+      name: ESPHome device name
+      description: >-
+        The "name:" of the clock in ESPHome (actions are called esphome.<name>_timer_sync).
+      default: wordclock
+      selector:
+        text:
+
+mode: queued
+
+triggers:
+  - trigger: state
+    entity_id: !input timers
+
+variables:
+  device: !input device_name
+  new_state: "{{ trigger.to_state.state if trigger.to_state else 'idle' }}"
+  old_state: "{{ trigger.from_state.state if trigger.from_state else 'idle' }}"
+
+actions:
+  - choose:
+      - conditions: "{{ new_state == 'active' }}"
+        sequence:
+          - action: "esphome.{{ device }}_timer_sync"
+            data:
+              remaining: >-
+                {{ ((as_datetime(trigger.to_state.attributes.finishes_at) - now()).total_seconds())
+                   | round(0) | int(0) }}
+              total: "{{ as_timedelta(trigger.to_state.attributes.duration).total_seconds() | int(0) }}"
+      # Cancelled or paused, but not finished normally (the clock handles that on its own)
+      - conditions: >-
+          {{ old_state == 'active' and new_state in ['idle', 'paused']
+             and (trigger.from_state.attributes.finishes_at is not defined
+                  or as_datetime(trigger.from_state.attributes.finishes_at) > now() + timedelta(seconds=2)) }}
+        sequence:
+          - action: "esphome.{{ device }}_timer_stop"

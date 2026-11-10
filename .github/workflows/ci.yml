@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./test/run_tests.sh
+
+  firmware:
+    runs-on: ubuntu-latest
+    container: ghcr.io/esphome/esphome:2026.10.0
+    strategy:
+      matrix:
+        board: [esp8266, esp32]
+    defaults:
+      run:
+        working-directory: esphome
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder secrets
+        run: |
+          cp secrets.yaml.example secrets.yaml
+          sed -i "s|^wordclock_api_key:.*|wordclock_api_key: \"$(head -c 32 /dev/urandom | base64)\"|" secrets.yaml
+      - run: esphome config wordclock-${{ matrix.board }}.yaml > /dev/null
+      - run: esphome compile wordclock-${{ matrix.board }}.yaml
+      - name: Collect firmware
+        run: |
+          mkdir -p ../firmware
+          find .esphome/build -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' | xargs -I{} cp {} ../firmware/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: firmware/

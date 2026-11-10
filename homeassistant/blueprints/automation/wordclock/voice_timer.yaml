@@ -1,0 +1,76 @@
+blueprint:
+  name: "Word clock: voice timer"
+  description: >-
+    Lets you set and stop the word clock timer with Home Assistant Assist. Sentences use the
+    Assist template syntax; {minutes} is the number of minutes. Only sentences in the language
+    of your Assist pipeline will match. Sentence triggers take precedence over the built-in
+    timer intent.
+  domain: automation
+  source_url: https://github.com/martpp/esphome-wordclock/blob/main/homeassistant/blueprints/automation/wordclock/voice_timer.yaml
+  input:
+    start_sentences:
+      name: Sentences to start a timer
+      default:
+        - "[set [a]] [word clock] timer [for] {minutes} minute[s]"
+        - "[Wortuhr] [stell[e]] [einen] Timer [auf|für|von] {minutes} Minute[n]"
+      selector:
+        text:
+          multiple: true
+    stop_sentences:
+      name: Sentences to stop the timer
+      default:
+        - "[word clock] (stop|cancel) [the] timer"
+        - "[Wortuhr] Timer (stopp|stoppen|abbrechen|aus|beenden)"
+      selector:
+        text:
+          multiple: true
+    started_response:
+      name: Response after starting
+      description: "{minutes} is replaced with the number of minutes."
+      default: "Timer set for {minutes} minutes"
+      selector:
+        text:
+    stopped_response:
+      name: Response after stopping
+      default: "Timer stopped"
+      selector:
+        text:
+    device_name:
+      name: ESPHome device name
+      description: The "name:" of the clock in ESPHome.
+      default: wordclock
+      selector:
+        text:
+
+mode: single
+
+triggers:
+  - trigger: conversation
+    command: !input start_sentences
+    id: start
+  - trigger: conversation
+    command: !input stop_sentences
+    id: stop
+
+variables:
+  device: !input device_name
+  started: !input started_response
+  stopped: !input stopped_response
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: start
+          - "{{ trigger.slots.minutes | int(0) > 0 }}"
+        sequence:
+          - action: "esphome.{{ device }}_timer_start"
+            data:
+              seconds: "{{ (trigger.slots.minutes | int) * 60 }}"
+          - set_conversation_response: "{{ started | replace('{minutes}', trigger.slots.minutes | int | string) }}"
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - action: "esphome.{{ device }}_timer_stop"
+          - set_conversation_response: "{{ stopped }}"

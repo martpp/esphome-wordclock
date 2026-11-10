@@ -1,0 +1,54 @@
+blueprint:
+  name: "Word clock: show Alexa timers"
+  description: >-
+    Shows the next Alexa timer of an Echo device on the word clock ("Alexa, set a timer for
+    10 minutes"). Requires the Alexa Media Player integration (HACS), which provides a
+    "next timer" sensor per Echo device. Deleting the timer early also stops it on the clock.
+  domain: automation
+  source_url: https://github.com/martpp/esphome-wordclock/blob/main/homeassistant/blueprints/automation/wordclock/alexa_timer.yaml
+  input:
+    next_timer:
+      name: Next timer sensor
+      description: The "next timer" sensor of your Echo device (sensor.<echo>_next_timer).
+      selector:
+        entity:
+          domain: sensor
+          device_class: timestamp
+    device_name:
+      name: ESPHome device name
+      description: The "name:" of the clock in ESPHome.
+      default: wordclock
+      selector:
+        text:
+
+mode: queued
+
+triggers:
+  - trigger: state
+    entity_id: !input next_timer
+
+variables:
+  device: !input device_name
+  end: "{{ as_datetime(trigger.to_state.state) if trigger.to_state else none }}"
+  old_end: "{{ as_datetime(trigger.from_state.state) if trigger.from_state else none }}"
+  # Original duration, if Alexa Media Player provides it (used for the progress display)
+  duration: >-
+    {% set active = state_attr(trigger.entity_id, 'sorted_active') %}
+    {% set timers = (active | from_json) if active is string else (active or []) %}
+    {% if timers | count > 0 and timers[0][1].originalDurationInMillis is defined %}
+      {{ (timers[0][1].originalDurationInMillis / 1000) | int }}
+    {% else %}0{% endif %}
+
+actions:
+  - choose:
+      - conditions: "{{ end is not none and end > now() }}"
+        sequence:
+          - action: "esphome.{{ device }}_timer_sync"
+            data:
+              remaining: "{{ (end - now()).total_seconds() | round(0) | int }}"
+              total: "{{ duration | int(0) }}"
+      # Timer deleted before it ran out
+      - conditions: >-
+          {{ end is none and old_end is not none and old_end > now() + timedelta(seconds=2) }}
+        sequence:
+          - action: "esphome.{{ device }}_timer_stop"

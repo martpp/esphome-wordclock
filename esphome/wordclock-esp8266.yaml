@@ -1,0 +1,21 @@
+# Example device configuration for a word clock on an ESP8266.
+# Copy this file and the wordclock/ folder into your ESPHome config directory and adjust it.
+
+substitutions:
+  name: wordclock
+  friendly_name: Word Clock
+  timezone: Europe/Berlin
+
+packages:
+  wordclock: !include wordclock/esp8266.yaml
+
+api:
+  encryption:
+    # Generate with: openssl rand -base64 32
+    key: !secret wordclock_api_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    password: !secret wordclock_ap_password

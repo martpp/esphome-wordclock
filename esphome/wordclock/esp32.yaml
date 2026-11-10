@@ -1,0 +1,27 @@
+# Board package for an ESP32 (wiring as in the original build guide).
+#
+# GPIO5 is a strapping pin; it works for the LED data line, the LEDs may flicker briefly at boot.
+# Optional DS3231 on GPIO21 (SDA) / GPIO22 (SCL).
+
+substitutions:
+  led_pin: GPIO5
+  sda_pin: GPIO21
+  scl_pin: GPIO22
+
+packages:
+  core: !include core.yaml
+
+esp32:
+  board: esp32dev
+
+i2c:
+  sda: ${sda_pin}
+  scl: ${scl_pin}
+  scan: false
+
+light:
+  - id: !extend clock_light
+    platform: esp32_rmt_led_strip
+    chipset: WS2812
+    channel_colors: GRB
+    pin: ${led_pin}

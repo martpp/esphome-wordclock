@@ -1,0 +1,511 @@
+# Word clock core: everything except the board specific parts.
+# Do not use this file directly; include esp8266.yaml or esp32.yaml (see ../wordclock-*.yaml).
+#
+# The rendering logic lives in wordclock.h. This file gathers the settings from the entities,
+# calls the renderer every 40 ms and exposes timers, animations and settings to Home Assistant.
+
+substitutions:
+  name: wordclock
+  friendly_name: Word Clock
+  timezone: Europe/Berlin
+  # Upper limit for the estimated LED current, keep it below your power supply's rating
+  max_current_ma: "3500"
+  # Duration of a full-on to off cross-fade
+  fade_ms: "400"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  includes:
+    - wordclock/wordclock.h
+  on_boot:
+    - priority: -100
+      then:
+        - if:
+            condition:
+              lambda: return !id(rtc_time).is_failed();
+            then:
+              - ds1307.read_time:
+                  id: rtc_time
+        - light.turn_on:
+            id: clock_light
+            effect: Word Clock
+        - script.execute: timer_publish
+
+logger:
+
+# Remove with "web_server: !remove" in your device file if you don't want it.
+# Note: its /update page accepts firmware without the OTA encryption key.
+web_server:
+  port: 80
+
+# The encryption key is set in your device file (api: encryption: key: !secret ...);
+# OTA below inherits it.
+api:
+  actions:
+    # Start a new timer, e.g. esphome.wordclock_timer_start with seconds: 300
+    - action: timer_start
+      variables:
+        seconds: int
+      then:
+        - lambda: |-
+            if (seconds > 0)
+              wordclock::runtime().timer.start(seconds * 1000u, seconds * 1000u, millis());
+            else
+              wordclock::runtime().timer.cancel();
+        - script.execute: timer_publish
+    # Take over a running timer from elsewhere (HA timer, Alexa): time left + original duration
+    - action: timer_sync
+      variables:
+        remaining: int
+        total: int
+      then:
+        - lambda: |-
+            if (remaining > 0)
+              wordclock::runtime().timer.start(remaining * 1000u, (total > 0 ? total : remaining) * 1000u, millis());
+            else
+              wordclock::runtime().timer.cancel();
+        - script.execute: timer_publish
+    # Cancel the timer or stop it from ringing
+    - action: timer_stop
+      then:
+        - lambda: wordclock::runtime().timer.cancel();
+        - script.execute: timer_publish
+    # Notification: name = door, doorbell, printer, washer, mail, done, warning
+    # seconds = 0: one cycle, otherwise repeat for that long
+    - action: animation_show
+      variables:
+        name: string
+        seconds: int
+      then:
+        - lambda: |-
+            using namespace wordclock;
+            const Animation a = animation_from_name(name.c_str());
+            if (a == Animation::COUNT)
+              ESP_LOGW("wordclock", "Unknown animation: %s", name.c_str());
+            runtime().animation.start(a, seconds > 0 ? seconds * 1000u : 0, millis());
+    - action: animation_stop
+      then:
+        - lambda: wordclock::runtime().animation.stop();
+
+ota:
+  - platform: esphome
+    encryption:  # inherits the API encryption key
+
+wifi:
+  id: wifi_component
+  ap:
+    ssid: "${friendly_name} Setup"
+
+captive_portal:
+
+time:
+  # Optional DS3231 module (register compatible with the DS1307). If none answers at boot, the
+  # component marks itself as failed and is skipped from then on.
+  - platform: ds1307
+    id: rtc_time
+    timezone: ${timezone}
+    update_interval: never
+  - platform: homeassistant
+    id: ha_time
+    timezone: ${timezone}
+    on_time_sync:
+      then:
+        - script.execute: rtc_store
+  # Second source, so the clock also gets the time after a reboot while Home Assistant is down
+  - platform: sntp
+    id: ntp_time
+    timezone: ${timezone}
+    on_time_sync:
+      then:
+        - script.execute: rtc_store
+
+globals:
+  # Timer color (0..1), set through the "Timer Color" light
+  - id: timer_r
+    type: float
+    initial_value: "1.0"
+  - id: timer_g
+    type: float
+    initial_value: "0.25"
+  - id: timer_b
+    type: float
+    initial_value: "0.0"
+
+output:
+  - platform: template
+    id: timer_r_out
+    type: float
+    write_action:
+      - lambda: id(timer_r) = state;
+  - platform: template
+    id: timer_g_out
+    type: float
+    write_action:
+      - lambda: id(timer_g) = state;
+  - platform: template
+    id: timer_b_out
+    type: float
+    write_action:
+      - lambda: id(timer_b) = state;
+
+light:
+  # Platform, pin and color order come from the board file (esp8266.yaml / esp32.yaml)
+  - id: clock_light
+    name: None
+    num_leds: 114
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 300ms
+    initial_state:
+      color_mode: RGB
+      brightness: 80%
+      red: 100%
+      green: 88%
+      blue: 78%
+    on_turn_on:
+      - light.turn_on:
+          id: clock_light
+          effect: Word Clock
+    effects:
+      - addressable_lambda:
+          name: Word Clock
+          update_interval: 40ms
+          lambda: |-
+            using namespace wordclock;
+            Runtime &rt = runtime();
+            const uint32_t now_ms = millis();
+            const ESPTime t = id(ha_time).now();
+
+            Style s;
+            s.clock_color = {current_color.r, current_color.g, current_color.b};
+            const size_t color_set = id(color_set_select).active_index().value_or(0);
+            if (color_set > 0 && color_set <= NUM_PALETTES)
+              s.palette = &PALETTES[color_set - 1];
+            s.palette_period_ms = static_cast<uint32_t>(id(color_cycle_number).state) * 1000u;
+            s.display = id(display_select).active_index().value_or(0) == 1 ? Display::ANALOG : Display::WORDS;
+            s.seconds_hand = id(seconds_hand_switch).state;
+            s.timer_style = static_cast<TimerStyle>(id(timer_style_select).active_index().value_or(0));
+            s.timer_color = {static_cast<uint8_t>(id(timer_r) * 255), static_cast<uint8_t>(id(timer_g) * 255),
+                             static_cast<uint8_t>(id(timer_b) * 255)};
+            s.prelude_level = static_cast<uint8_t>(id(timer_prelude_number).state * 255 / 100);
+            s.dialect = id(dialect_select).active_index().value_or(0) == 1 ? Dialect::EAST : Dialect::WEST;
+            s.show_wifi_hint = !id(wifi_component).is_connected();
+            if (t.is_valid() && id(night_mode_switch).state &&
+                is_night(t.hour, (int) id(night_start_number).state, (int) id(night_end_number).state))
+              s.level = static_cast<uint8_t>(id(night_brightness_number).state * 255 / 100);
+
+            // An animation covers the clock; the timer keeps running behind it.
+            const bool animating = rt.animation.active(now_ms);
+            Frame target = animating ? render_animation(rt.animation.animation(), rt.animation.elapsed_ms(now_ms), s.level)
+                                     : render(t.hour, t.minute, t.second, t.is_valid(), rt.timer, now_ms, s);
+            limit_current(target, ${max_current_ma});
+            if (animating)
+              rt.shown = target;  // no cross-fade for animations, it would smear them
+            else
+              fade_towards(rt.shown, target, fade_step(40, ${fade_ms}));
+            for (int i = 0; i < NUM_LEDS; i++)
+              it[i] = Color(rt.shown[i].r, rt.shown[i].g, rt.shown[i].b);
+      - addressable_rainbow:
+          name: LED Test
+
+  # Virtual light, only used to pick the timer color and brightness
+  - platform: rgb
+    id: timer_color_light
+    name: Timer Color
+    icon: mdi:timer-sand
+    red: timer_r_out
+    green: timer_g_out
+    blue: timer_b_out
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: RESTORE_DEFAULT_ON
+    initial_state:
+      color_mode: RGB
+      brightness: 100%
+      red: 100%
+      green: 25%
+      blue: 0%
+
+script:
+  # Write the network time to the RTC module, if there is one
+  - id: rtc_store
+    then:
+      - if:
+          condition:
+            lambda: return !id(rtc_time).is_failed();
+          then:
+            - ds1307.write_time:
+                id: rtc_time
+  # Report the timer state to Home Assistant (only on changes, to keep the recorder small)
+  - id: timer_publish
+    then:
+      - lambda: |-
+          using namespace wordclock;
+          const Timer &tm = runtime().timer;
+          const uint32_t now_ms = millis();
+          switch (tm.state()) {
+            case TimerState::IDLE:
+              id(timer_status_sensor).publish_state("idle");
+              break;
+            case TimerState::RUNNING:
+              id(timer_status_sensor).publish_state("running");
+              break;
+            case TimerState::RINGING:
+              id(timer_status_sensor).publish_state("ringing");
+              break;
+          }
+          id(timer_ringing_sensor).publish_state(tm.state() == TimerState::RINGING);
+          const ESPTime t = id(ha_time).now();
+          if (tm.state() == TimerState::RUNNING && t.is_valid()) {
+            id(timer_end_sensor).publish_state(t.timestamp + (tm.remaining_ms(now_ms) + 500) / 1000);
+            id(timer_duration_sensor).publish_state(tm.total_ms() / 1000);
+          } else {
+            id(timer_end_sensor).publish_state(NAN);
+            id(timer_duration_sensor).publish_state(NAN);
+          }
+
+interval:
+  - interval: 200ms
+    then:
+      - lambda: |-
+          const uint32_t timeout_ms = static_cast<uint32_t>(id(ring_duration_number).state) * 1000u;
+          if (wordclock::runtime().timer.update(millis(), timeout_ms))
+            id(timer_publish).execute();
+
+sensor:
+  - platform: template
+    id: timer_end_sensor
+    name: Timer End
+    icon: mdi:timer-alert-outline
+    device_class: timestamp
+    update_interval: never
+  - platform: template
+    id: timer_duration_sensor
+    name: Timer Duration
+    icon: mdi:timer-outline
+    unit_of_measurement: s
+    device_class: duration
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 300s
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: template
+    id: timer_status_sensor
+    name: Timer Status
+    icon: mdi:timer-cog-outline
+    update_interval: never
+
+binary_sensor:
+  - platform: template
+    id: timer_ringing_sensor
+    name: Timer Ringing
+    icon: mdi:bell-ring
+  # Only detected at boot: restart after connecting a module
+  - platform: template
+    id: rtc_present_sensor
+    name: RTC Module
+    icon: mdi:clock-check-outline
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: return !id(rtc_time).is_failed();
+
+button:
+  - platform: template
+    name: Start Timer
+    icon: mdi:play
+    on_press:
+      - lambda: |-
+          const uint32_t ms = static_cast<uint32_t>(id(timer_minutes_number).state * 60000.0f);
+          wordclock::runtime().timer.start(ms, ms, millis());
+      - script.execute: timer_publish
+  - platform: template
+    name: Stop Timer
+    icon: mdi:stop
+    on_press:
+      - lambda: wordclock::runtime().timer.cancel();
+      - script.execute: timer_publish
+  - platform: template
+    name: Play Animation
+    icon: mdi:animation-play-outline
+    on_press:
+      - lambda: |-
+          using namespace wordclock;
+          runtime().animation.start(static_cast<Animation>(id(animation_select).active_index().value_or(0)), 0, millis());
+  - platform: restart
+    name: Restart
+    entity_category: config
+
+number:
+  - platform: template
+    id: timer_minutes_number
+    name: Timer Minutes
+    icon: mdi:timer-edit-outline
+    min_value: 1
+    max_value: 180
+    step: 1
+    unit_of_measurement: min
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 10
+  - platform: template
+    id: color_cycle_number
+    name: Color Cycle Duration
+    icon: mdi:palette-swatch-outline
+    min_value: 5
+    max_value: 900
+    step: 5
+    unit_of_measurement: s
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 60
+  - platform: template
+    id: ring_duration_number
+    name: Ring Duration
+    icon: mdi:bell-cog-outline
+    min_value: 0
+    max_value: 900
+    step: 10
+    unit_of_measurement: s
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 120
+  - platform: template
+    id: timer_prelude_number
+    name: Timer Prelude Brightness
+    icon: mdi:brightness-6
+    min_value: 0
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+  - platform: template
+    id: night_brightness_number
+    name: Night Brightness
+    icon: mdi:weather-night
+    min_value: 5
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 25
+  - platform: template
+    id: night_start_number
+    name: Night Start
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    unit_of_measurement: h
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 22
+  - platform: template
+    id: night_end_number
+    name: Night End
+    icon: mdi:clock-end
+    min_value: 0
+    max_value: 23
+    step: 1
+    unit_of_measurement: h
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 6
+
+switch:
+  - platform: template
+    id: seconds_hand_switch
+    name: Seconds Hand
+    icon: mdi:clock-time-four-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: template
+    id: night_mode_switch
+    name: Night Mode
+    icon: mdi:weather-night
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+select:
+  - platform: template
+    id: display_select
+    name: Display
+    icon: mdi:clock-outline
+    options:
+      - "Word Clock"
+      - "Analog Clock"
+    initial_option: "Word Clock"
+    optimistic: true
+    restore_value: true
+  # Same order as PALETTES in wordclock.h
+  - platform: template
+    id: color_set_select
+    name: Color Set
+    icon: mdi:palette
+    options:
+      - "Single Color"
+      - "Rainbow"
+      - "Sunset"
+      - "Ocean"
+      - "Forest"
+      - "Fire"
+      - "Pastel"
+      - "Aurora"
+    initial_option: "Single Color"
+    optimistic: true
+    restore_value: true
+  # Same order as TimerStyle in wordclock.h
+  - platform: template
+    id: timer_style_select
+    name: Timer Style
+    icon: mdi:timer-sand
+    options:
+      - "Letters"
+      - "Ring"
+      - "Pie"
+    initial_option: "Letters"
+    optimistic: true
+    restore_value: true
+  # Same order as Animation in wordclock.h
+  - platform: template
+    id: animation_select
+    name: Animation
+    icon: mdi:animation-outline
+    options:
+      - "Door"
+      - "Doorbell"
+      - "3D Printer"
+      - "Washer"
+      - "Mail"
+      - "Done"
+      - "Warning"
+    initial_option: "Door"
+    optimistic: true
+    restore_value: true
+  # Same order as Dialect in wordclock.h
+  - platform: template
+    id: dialect_select
+    name: Dialect
+    icon: mdi:translate
+    entity_category: config
+    options:
+      - "West (viertel nach / viertel vor)"
+      - "East (viertel / dreiviertel)"
+    initial_option: "West (viertel nach / viertel vor)"
+    optimistic: true
+    restore_value: true
