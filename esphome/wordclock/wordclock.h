@@ -8,7 +8,7 @@
 // LED layout (derived from the word indices of the "Wortuhr V3" sketch by Mirc0):
 //   10 rows x 11 letters of WS2812B wired as a serpentine:
 //   even rows run left -> right, odd rows right -> left.
-//   The 4 minute dots follow as LEDs 110-113.
+//   The 4 minute dots follow as LEDs 110-113, in a row centered below the letters, left to right.
 //
 //      col  0 1 2 3 4 5 6 7 8 9 10
 //   row 0   E S K I S T A F Ü N F
@@ -21,6 +21,7 @@
 //       7   S E C H S N L A C H T
 //       8   S I E B E N Z W Ö L F
 //       9   Z E H N E U N K U H R
+//                ● ● ● ●                 (minute dots, LEDs 110..113)
 //   Filler letters (K, A, X, AM, AUJ, NL, K) are never lit by the time, only by timers and animations.
 #pragma once
 

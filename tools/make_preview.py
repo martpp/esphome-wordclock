@@ -58,11 +58,12 @@ for (let row = 0; row < 10; row++) for (let col = 0; col < 11; col++) {
   plate.appendChild(el);
   cells[row * 11 + (row % 2 === 0 ? col : 10 - col)] = el;
 }
-[["3%", "3%", "left", "top"], ["3%", "3%", "right", "top"], ["3%", "3%", "right", "bottom"], ["3%", "3%", "left", "bottom"]].forEach((p, i) => {
+// four minute dots in a row centered below the letters, LEDs 110..113 from left to right
+[0, 1, 2, 3].forEach(i => {
   const el = document.createElement("span");
   el.className = "dot";
-  el.style[p[2]] = p[0];
-  el.style[p[3]] = p[1];
+  el.style.left = (50 + (i - 1.5) * 7.6 - 0.8) + "%";
+  el.style.bottom = "3%";
   plate.appendChild(el);
   cells[110 + i] = el;
 });

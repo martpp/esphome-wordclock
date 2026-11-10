@@ -37,7 +37,7 @@ All images in this README are rendered from the actual firmware code (see [Devel
 
 **Clock faces**
 
-- **Word clock** in 5 minute steps, with four corner dots for the minutes in between. Two
+- **Word clock** in 5 minute steps, with four dots below the letters for the minutes in between. Two
   dialects: *West* ("viertel nach zwei", "viertel vor drei") and *East* ("viertel drei",
   "dreiviertel drei").
 - **Analog clock**: hour and minute hands, twelve faint hour marks and an optional seconds dot
@@ -92,8 +92,9 @@ cuts without WiFi; the firmware detects at boot whether one is connected. Withou
 ### LED layout
 
 The strips are laid as a serpentine: row 0 runs left to right, row 1 right to left and so on,
-starting at the top left letter. The four minute dots follow as LEDs 110 to 113 and light up in
-that order. Follow the arrows on the strip when soldering.
+starting at the top left letter. The four minute dots sit in a row centered below the letters and
+follow as LEDs 110 to 113 from left to right; they fill up from the left for 1 to 4 minutes past
+each 5 minute step. Follow the arrows on the strip when soldering.
 
 ```
       col  0 1 2 3 4 5 6 7 8 9 10
@@ -107,6 +108,7 @@ that order. Follow the arrows on the strip when soldering.
        7   S E C H S N L A C H T
        8   S I E B E N Z W Ö L F
        9   Z E H N E U N K U H R      ← LEDs  99..109
+                ● ● ● ●                → LEDs 110..113 (minute dots)
 ```
 
 Filler letters such as the K in "ES K IST" are never lit by the time, only by timers and

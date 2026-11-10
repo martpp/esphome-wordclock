@@ -426,8 +426,10 @@ static void print_frame(const Frame &f, const Mask &time) {
     std::printf("\n");
   }
   std::printf("   ");
+  for (int i = 0; i < (COLS - NUM_DOTS) * 3 / 2; i++)  // center the dots below the letters
+    std::printf(" ");
   for (int i = 0; i < NUM_DOTS; i++)
-    std::printf(f[FIRST_DOT + i] != BLACK ? " o " : "   ");
+    std::printf(f[FIRST_DOT + i] != BLACK ? " o " : " . ");
   std::printf("\n\n");
 }
 

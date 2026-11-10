@@ -65,7 +65,8 @@ def render(frame, cell, font):
                 d_base.text(xy, ch, fill=(34, 35, 40), font=font, anchor="mm")
             else:
                 d_light.text(xy, ch, fill=tuple(int(hexc[i:i + 2], 16) for i in (0, 2, 4)), font=font, anchor="mm")
-    for i, (x, y) in enumerate([(pad / 2, pad / 2), (w - pad / 2, pad / 2), (w - pad / 2, h - pad / 2), (pad / 2, h - pad / 2)]):
+    # four minute dots in a row centered below the letters, LEDs 110..113 from left to right
+    for i, (x, y) in enumerate([(w / 2 + (k - 1.5) * cell, h - pad / 2) for k in range(4)]):
         hexc = frame[(110 + i) * 6:(110 + i) * 6 + 6]
         r = max(2, cell // 9)
         col = (34, 35, 40) if hexc == "000000" else tuple(int(hexc[j:j + 2], 16) for j in (0, 2, 4))
